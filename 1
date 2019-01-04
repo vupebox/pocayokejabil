@@ -1,0 +1,272 @@
+/**********************************Control de pokayoque********************************
+ * 
+ * Name:        Pokayoque_control_2_05092018
+ * By:          Josue Ximello Rios
+ * Description: Program to control The electronic table tester machine 
+ * 
+*/
+
+//Defined constants------------------------------------------------------------------------
+#define D_MP025SENSOR   A0
+#define DM9P_1          13
+#define DM9P_2          12
+#define E2B_M12         11
+#define E_valve_1       10
+#define E_valve_2       9
+#define Red_light       8
+#define Relay_x         7
+#define E_stop          5
+#define Btn_1           6
+#define Btn_2           4
+#define Key_switch      3
+#define Sensor_1        2
+
+#define TRUE            1
+#define FALSE           0
+#define MAXTST          500
+#define MAXTS           20
+
+//Declared constants-----------------------------------------------------------------------
+const float vBase  = 12.14;
+const float vInitS = 0.5;
+const float RVALUE = 1.51;
+const float MAXVS  = 1.65;        //Valor real " const float MAXVS  = 1.52; "   1.66 - 1.66 - 1.36
+const float MINVS  = 1.21;
+const float INITS  = 6.00;
+
+//Global variables-------------------------------------------------------------------------
+int flag = 0;
+
+//Struncts---------------------------------------------------------------------------------
+struct D_MP025{   
+    #define VOLTAGE(b) (b*(5.000/1024.000)) + (b*0.00012) + (b*0.00003125)
+    int16_t binary_value = 0;
+    float   voltage;
+    const float cor_value = 0.150;
+    float   mMetros;
+  }d_mp025;
+
+//SetUp------------------------------------------------------------------------------------
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(D_MP025SENSOR,INPUT);
+  pinMode(DM9P_1,INPUT);
+  pinMode(DM9P_2,INPUT);
+  pinMode(E2B_M12,INPUT);
+  pinMode(E_valve_1,OUTPUT);
+  pinMode(E_valve_2,OUTPUT);
+  pinMode(Red_light,OUTPUT);
+  pinMode(Relay_x,OUTPUT);
+  pinMode(E_stop,INPUT);
+  pinMode(Btn_1,INPUT);
+  pinMode(Btn_2,INPUT);
+  pinMode(Key_switch,INPUT);
+  pinMode(Sensor_1,INPUT);
+
+
+  //Initial values
+
+  Serial.println("Main init values");
+  init_values();
+}
+
+
+void loop() {
+
+  Serial.println("Main loop");
+  mainFunction();  
+  delay(100);
+  
+
+}
+
+
+//Main function----------------------------------------------------------------------------
+void mainFunction(){
+
+  flag = FALSE;
+  
+  if(digitalRead(Sensor_1)){Serial.println("topSensing"); flag = topSensing();}  //Top sensing
+  
+  if(flag){Serial.println("ButtSensing"); flag = buttSensing();}                  //Butt sensing
+  
+  if(flag){Serial.println("clamping Function"); flag = clampingFunction();}             //Clamping function
+  
+  if(flag){Serial.println("button Function"); flag = buttonFunction();}               //Button function
+  
+  init_values();  
+}
+
+
+//buttonFunction wait until both buttons are pressed and begins with the sensing-----------
+
+int buttonFunction(){
+
+  long int timeout = 0;
+  float s;
+  int valueR = 0;
+  while(!digitalRead(Btn_1) || !digitalRead(Btn_2)){
+    if(keySwitchSensing()) return FALSE;
+  }
+
+   digitalWrite(E_valve_2,LOW);
+  
+    delay(3000);
+    if((s = read_D_MP025()) < MAXVS){
+
+       Serial.println("-----------------------------");
+       return TRUE;
+    }
+
+      Serial.println("-----------------------------");
+  while(TRUE){
+    initError(TRUE);
+    if(keySwitchSensing()){initError(FALSE);  return FALSE;}
+  }
+
+}
+
+/* clampingFunction activate the clamping piston´s electrovalve*/
+int clampingFunction(){
+
+    digitalWrite(E_valve_1,LOW);
+    delay(500);
+
+    if(digitalRead(DM9P_2)){        //if(!digitalRead(DM9P_1) && digitalRead(DM9P_2)){
+        Serial.println("Clamping CORRECT 1");
+        return TRUE;
+      }
+      else{
+
+          Serial.println("Clamping ERROR 2");
+          initError(TRUE);
+          while(!keySwitchSensing());
+          return FALSE;
+        }
+
+    Serial.println("Clamping ERROR 3");
+    return FALSE;
+    
+}
+
+/*buttSensingFunction is for read the capacitive sensor that detects the butt of the
+  clamping main table--------------------------------------------------------------------*/
+int buttSensing(){
+
+  while(!initValuesSensing()){ 
+    initError(TRUE);
+    if(keySwitchSensing()){initError(FALSE);  return FALSE;}
+  }
+
+  initError(FALSE);
+  
+  while(!digitalRead(E2B_M12)){
+      if(!digitalRead(E_stop)) emergencyStop();
+  }
+
+  return TRUE;
+
+}
+//Function to sense the top----------------------------------------------------------------
+int topSensing(){
+  long int timeout = 0;
+  while(digitalRead(Sensor_1)){
+      if(timeout >= MAXTST) return TRUE;
+      timeout++;
+      delay(10);
+      Serial.println("TopSensing Correct reading");
+      if(!digitalRead(E_stop)) emergencyStop();
+  }
+
+  Serial.println("TopSensing Error!!");
+  return FALSE;
+}
+
+/*Function to set the initial values, if the function do not accomplish the requirments
+  it will to reset the */
+void init_values(){
+
+    Serial.println("init Values");
+
+  do{
+    digitalWrite(E_valve_1,HIGH);
+    digitalWrite(E_valve_2,HIGH);
+    digitalWrite(Red_light,HIGH);
+    digitalWrite(Relay_x,HIGH);
+
+    delay(1000);
+    if(!initValuesSensing()) initError(TRUE);
+    
+  }while(!initValuesSensing()); 
+
+  initError(FALSE);
+}
+
+//initValuesSensing function check if the values sensor are in the init positions----------
+int initValuesSensing(){
+    if(!digitalRead(DM9P_1)){Serial.println("DM9P_1 error"); return FALSE;}
+    
+    if(digitalRead(DM9P_2)){Serial.println("DM9P_2 error"); return FALSE;}
+
+    if(read_D_MP025() < INITS){Serial.println("DMP025 error"); return FALSE;}
+
+    return TRUE;
+}
+
+//Function to take emergency stop----------------------------------------------------------
+void emergencyStop(){
+  digitalWrite(Red_light,HIGH);
+  while(digitalRead(E_stop));
+  digitalWrite(Red_light,LOW);
+}
+
+/*initError fucntion turn on the red light to indicate that there is an error in the
+  initial values*/
+void initError(int s){
+  
+  if(s){Serial.println("Init ERROR"); s = FALSE;}
+  else{ Serial.println("INIT CORRECT"); s = TRUE;}
+  digitalWrite(Red_light,s);
+  delay(400);
+}
+
+//keySwitchSensing function reads the state of the key switch for cancel the process-------
+int keySwitchSensing(){ 
+
+  Serial.println("KeySwitch ERROR");
+  if(digitalRead(Key_switch)){ 
+    while(digitalRead(Key_switch));
+      initError(FALSE);
+      if(!digitalRead(Key_switch)){ return TRUE; }
+  }
+    return FALSE;
+}
+
+
+//Function to read the values from tha D_MP025 analog sensor-------------------------------
+float read_D_MP025(){
+
+  for(int i =0; i < 40;i++){
+    d_mp025.binary_value += analogRead(D_MP025SENSOR);
+  }
+
+  d_mp025.binary_value = d_mp025.binary_value/40;
+  
+  d_mp025.voltage = VOLTAGE(d_mp025.binary_value)-d_mp025.cor_value;
+  
+  d_mp025.mMetros = (d_mp025.voltage/500.000)*(2500.000);
+  d_mp025.mMetros -= vBase;
+  d_mp025.mMetros *= -1;
+  
+  Serial.print("Value: ");
+  Serial.print(d_mp025.binary_value);
+  Serial.print("\t");
+  Serial.print(d_mp025.voltage,3);
+  Serial.print("\t");
+  Serial.println(d_mp025.mMetros);
+  //printFloat(d_mp025.voltage);
+
+  return d_mp025.mMetros;
+
+}
